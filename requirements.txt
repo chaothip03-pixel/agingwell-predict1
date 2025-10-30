@@ -3,4 +3,4 @@ uvicorn
 pydantic
 pandas
 scikit-learn
-Orange3
+Orange3==3.36.2
