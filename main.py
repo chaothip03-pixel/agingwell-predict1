@@ -4,9 +4,6 @@ import pandas as pd
 import os
 import pickle
 
-# ลบบรรทัดนี้ถ้าไม่ใช้ FP-Growth
-# from orangecontrib.associate.fpgrowth import *
-
 app = FastAPI()
 
 # โหลดโมเดล
@@ -48,7 +45,7 @@ def home():
 @app.post("/predict")
 def predict(data: HealthData):
     if model is None:
-        raise HTTPException(500, "โมเดลไม่พร้อมใช้งาน")
+        raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน")
 
     df = pd.DataFrame([data.dict()])
 
@@ -66,4 +63,4 @@ def predict(data: HealthData):
             "recommendation": recommendation
         }
     except Exception as e:
-        raise HTTPException(500, f"การทำนายล้มเหลว: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"การทำนายล้มเหลว: {str(e)}")  # แก้แล้ว!
