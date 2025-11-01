@@ -4,15 +4,12 @@ import pandas as pd
 import os
 import pickle
 
-# ใช้ import ที่ถูกต้อง
-try:
-    from orangecontrib.associate.fpgrowth import *  # ถ้าต้องการ FP-Growth
-except Exception as e:
-    print("orangecontrib.associate ไม่จำเป็น หรือโหลดไม่ได้:", e)
+# ลบบรรทัดนี้ถ้าไม่ใช้ FP-Growth
+# from orangecontrib.associate.fpgrowth import *
 
 app = FastAPI()
 
-# โหลดโมเดลจาก Orange (.pkcls)
+# โหลดโมเดล
 MODEL_PATH = "agingwell_final_1.pkcls"
 model = None
 
@@ -24,7 +21,7 @@ if os.path.exists(MODEL_PATH):
     except Exception as e:
         print(f"โหลดโมเดลล้มเหลว: {e}")
 else:
-    print(f"ไม่พบไฟล์โมเดล: {MODEL_PATH}")
+    print(f"ไม่พบไฟล์: {MODEL_PATH}")
 
 class HealthData(BaseModel):
     Meals_per_day: float
@@ -43,7 +40,7 @@ class HealthData(BaseModel):
 @app.get("/")
 def home():
     return {
-        "message": "AgingWell AI (Orange3) พร้อม!",
+        "message": "AgingWell AI พร้อม!",
         "model_loaded": model is not None,
         "model_path": MODEL_PATH
     }
@@ -51,27 +48,12 @@ def home():
 @app.post("/predict")
 def predict(data: HealthData):
     if model is None:
-        raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน - ตรวจสอบว่าไฟล์ .pkcls มีอยู่และถูกต้อง")
+        raise HTTPException(500, "โมเดลไม่พร้อมใช้งาน")
 
-    # สร้าง DataFrame
-    df = pd.DataFrame([{
-        'Meals_per_day': data.Meals_per_day,
-        'Food_Intake_Percentage': data.Food_Intake_Percentage,
-        'Calories': data.Calories,
-        'BMI': data.BMI,
-        'BMR': data.BMR,
-        'Body_Fat_Percentage': data.Body_Fat_Percentage,
-        'ID': data.ID,
-        'Weight_Trend_Clear_Decrease': data.Weight_Trend_Clear_Decrease,
-        'Weight_Trend_Increase': data.Weight_Trend_Increase,
-        'Weight_Trend_Severe_Decrease': data.Weight_Trend_Severe_Decrease,
-        'Weight_Trend_Slight_Decrease': data.Weight_Trend_Slight_Decrease,
-        'Weight_Trend_Stable': data.Weight_Trend_Stable
-    }])
+    df = pd.DataFrame([data.dict()])
 
     try:
-        # ทำนายด้วยโมเดล Orange
-        prediction = model(df)[0]  # ค่าที่ทำนายได้ (0 หรือ 1)
+        prediction = model(df)[0]
         probabilities = model(df, probs=True)[0]
         confidence = round(max(probabilities) * 100, 2)
 
@@ -81,9 +63,7 @@ def predict(data: HealthData):
         return {
             "status": status,
             "confidence": f"{confidence}%",
-            "recommendation": recommendation,
-            "raw_prediction": int(prediction),
-            "probabilities": [round(p * 100, 2) for p in probabilities]
+            "recommendation": recommendation
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"การทำนายล้มเหลว: {str(e)}")
+        raise HTTPException(500, f"การทำนายล้มเหลว: {str(e)}"))
