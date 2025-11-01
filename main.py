@@ -66,4 +66,4 @@ def predict(data: HealthData):
             "recommendation": recommendation
         }
     except Exception as e:
-        raise HTTPException(500, f"การทำนายล้มเหลว: {str(e)}"))
+        raise HTTPException(500, f"การทำนายล้มเหลว: {str(e)}")
