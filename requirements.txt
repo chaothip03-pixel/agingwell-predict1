@@ -4,5 +4,5 @@ pydantic
 pandas
 scikit-learn==1.3.2
 Orange3==3.36.2
-orangecontrib-associate  # เพิ่มบรรทัดนี้
+orange3-associate        # ชื่อแพ็กเกจที่ถูกต้อง
 python-multipart
