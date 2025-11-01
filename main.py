@@ -1,29 +1,22 @@
-# main.py (เวอร์ชันปรับปรุง)
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
-import pickle
-import numpy as np
+import joblib
 import pandas as pd
-import io
 import os
+from typing import Dict
 
-app = FastAPI(title="AgingWell AI", version="1.0")
-
-MODEL_PATH = "agingwell_final_1.pkcls"
-model = None
+app = FastAPI()
 
 # โหลดโมเดล
-if os.path.exists(MODEL_PATH):
-    try:
-        with open(MODEL_PATH, "rb") as f:
-            model = pickle.load(f)
-        print("โมเดลโหลดสำเร็จ!")
-    except Exception as e:
-        print(f"โหลดโมเดลล้มเหลว: {e}")
+model_path = "agingwell_final_1.pkcls"
+if os.path.exists(model_path):
+    model = joblib.load(model_path)
+    model_loaded = True
 else:
-    print(f"ไม่พบไฟล์: {MODEL_PATH}")
+    model = None
+    model_loaded = False
 
-class HealthData(BaseModel):
+class PredictRequest(BaseModel):
     Meals_per_day: float
     Food_Intake_Percentage: float
     Calories: float
@@ -31,89 +24,70 @@ class HealthData(BaseModel):
     BMR: float
     Body_Fat_Percentage: float
     ID: int
-    Weight_Trend_Clear_Decrease: int = 0
-    Weight_Trend_Increase: int = 0
-    Weight_Trend_Severe_Decrease: int = 0
-    Weight_Trend_Slight_Decrease: int = 0
-    Weight_Trend_Stable: int = 0
+    Weight_Trend_Clear_Decrease: int
+    Weight_Trend_Increase: int
+    Weight_Trend_Severe_Decrease: int
+    Weight_Trend_Slight_Decrease: int
+    Weight_Trend_Stable: int
 
 @app.get("/")
-def home():
+def read_root():
     return {
         "message": "AgingWell AI API พร้อมใช้งาน!",
-        "model_loaded": model is not None
+        "model_loaded": model_loaded
     }
 
 @app.post("/predict")
-def predict(data: HealthData):
-    if model is None:
-        raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน")
-    
-    features = np.array([[
-        data.Meals_per_day, data.Food_Intake_Percentage, data.Calories,
-        data.BMI, data.BMR, data.Body_Fat_Percentage, data.ID,
-        data.Weight_Trend_Clear_Decrease, data.Weight_Trend_Increase,
-        data.Weight_Trend_Severe_Decrease, data.Weight_Trend_Slight_Decrease,
-        data.Weight_Trend_Stable
-    ]])
+def predict(data: PredictRequest):
+    if not model_loaded:
+        return {"error": "โมเดลไม่พร้อมใช้งาน"}
     
     try:
-        pred = model.predict(features)[0]
-        prob = model.predict_proba(features)[0]
-        confidence = round(max(prob) * 100, 2)
-        status = "มีภาวะเบื่ออาหาร" if ("Loss" in str(pred) or pred == 1) else "ปกติ"
+        # แปลงเป็น DataFrame
+        df = pd.DataFrame([data.dict()])
+        
+        # ทำนาย
+        prediction = model.predict(df)[0]
+        confidence = float(model.predict_proba(df).max() * 100)
+        
+        status = "มีภาวะเบื่ออาหาร" if prediction == 1 else "ปกติ"
+        recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if prediction == 1 else "รักษาพฤติกรรมการกินต่อไป"
         
         return {
-            "prediction": str(pred),
+            "prediction": str(prediction),
             "status": status,
-            "confidence": confidence,
-            "recommendation": "ควรเพิ่มมื้ออาหารและโปรตีน" if status == "มีภาวะเบื่ออาหาร" else "รักษาการกินอาหารที่ดีต่อไป"
+            "confidence": round(confidence, 2),
+            "recommendation": recommendation
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ทำนายล้มเหลว: {str(e)}")
+        return {"error": str(e)}
 
 @app.post("/predict_tab")
 async def predict_tab(tab_file: UploadFile = File(...)):
-    if model is None:
-        raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน")
-
+    if not model_loaded:
+        return {"error": "โมเดลไม่พร้อมใช้งาน"}
+    
     try:
         content = await tab_file.read()
-        df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep='\t')
-        if df.empty:
-            raise HTTPException(status_code=400, detail="ไฟล์ว่างเปล่า")
+        df = pd.read_csv(pd.compat.StringIO(content.decode('utf-8')), sep='\t')
         
-        row = df.iloc[0]
-        trend = row['Weight_Trend']
+        # ตรวจสอบคอลัมน์
+        required_cols = ['Meals_per_day', 'Food_Intake_Percentage', 'Calories', 'BMI', 'BMR', 'Body_Fat_Percentage']
+        if not all(col in df.columns for col in required_cols):
+            return {"error": "ไฟล์ .tab ไม่มีคอลัมน์ที่จำเป็น"}
         
-        features = np.array([[
-            float(row['Meals_per_day']),
-            float(row['Food_Intake_Percentage']),
-            float(row['Calories']),
-            float(row['BMI']),
-            float(row['BMR']),
-            float(row['Body_Fat_Percentage']),
-            int(row['ID']),
-            1 if trend == "Clear Decrease" else 0,
-            1 if trend == "Increase" else 0,
-            1 if trend == "Severe Decrease" else 0,
-            1 if trend == "Slight Decrease" else 0,
-            1 if trend == "Stable" else 0
-        ]])
-
-        pred = model.predict(features)[0]
-        prob = model.predict_proba(features)[0]
-        confidence = round(max(prob) * 100, 2)
-        status = "มีภาวะเบื่ออาหาร" if ("Loss" in str(pred) or pred == 1) else "ปกติ"
-
+        # ทำนาย
+        prediction = model.predict(df)[0]
+        confidence = float(model.predict_proba(df).max() * 100)
+        
+        status = "มีภาวะเบื่ออาหาร" if prediction == 1 else "ปกติ"
+        recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if prediction == 1 else "รักษาพฤติกรรมการกินต่อไป"
+        
         return {
+            "prediction": str(prediction),
             "status": status,
-            "confidence": confidence,
-            "recommendation": "ควรเพิ่มมื้ออาหารและโปรตีน" if status == "มีภาวะเบื่ออาหาร" else "รักษาการกินอาหารที่ดีต่อไป"
+            "confidence": round(confidence, 2),
+            "recommendation": recommendation
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"อ่านไฟล์หรือทำนายล้มเหลว: {str(e)}")
-        "status": status,
-        "confidence": confidence,
-        "recommendation": "ควรเพิ่มมื้ออาหารและโปรตีน" if status == "มีภาวะเบื่ออาหาร" else "รักษาการกินอาหารที่ดีต่อไป"
-    }
+        return {"error": str(e)}
