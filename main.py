@@ -1,22 +1,27 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import joblib
 import pandas as pd
 import os
-from typing import Dict
+from orangecontrib.associate.fpgrowth import *  # ถ้าต้องการ
+import pickle
 
 app = FastAPI()
 
-# โหลดโมเดล
-model_path = "agingwell_final_1.pkcls"
-if os.path.exists(model_path):
-    model = joblib.load(model_path)
-    model_loaded = True
-else:
-    model = None
-    model_loaded = False
+# โหลดโมเดลจาก Orange (.pkcls)
+MODEL_PATH = "agingwell_final_1.pkcls"
+model = None
 
-class PredictRequest(BaseModel):
+if os.path.exists(MODEL_PATH):
+    try:
+        with open(MODEL_PATH, "rb") as f:
+            model = pickle.load(f)
+        print("โหลดโมเดลจาก Orange สำเร็จ!")
+    except Exception as e:
+        print(f"โหลดโมเดลล้มเหลว: {e}")
+else:
+    print("ไม่พบไฟล์ agingwell_final_1.pkcls")
+
+class HealthData(BaseModel):
     Meals_per_day: float
     Food_Intake_Percentage: float
     Calories: float
@@ -24,70 +29,50 @@ class PredictRequest(BaseModel):
     BMR: float
     Body_Fat_Percentage: float
     ID: int
-    Weight_Trend_Clear_Decrease: int
-    Weight_Trend_Increase: int
-    Weight_Trend_Severe_Decrease: int
-    Weight_Trend_Slight_Decrease: int
-    Weight_Trend_Stable: int
+    Weight_Trend_Clear_Decrease: int = 0
+    Weight_Trend_Increase: int = 0
+    Weight_Trend_Severe_Decrease: int = 0
+    Weight_Trend_Slight_Decrease: int = 0
+    Weight_Trend_Stable: int = 0
 
 @app.get("/")
-def read_root():
-    return {
-        "message": "AgingWell AI API พร้อมใช้งาน!",
-        "model_loaded": model_loaded
-    }
+def home():
+    return {"message": "AgingWell AI (Orange3) พร้อม!", "model_loaded": model is not None}
 
 @app.post("/predict")
-def predict(data: PredictRequest):
-    if not model_loaded:
-        return {"error": "โมเดลไม่พร้อมใช้งาน"}
-    
-    try:
-        # แปลงเป็น DataFrame
-        df = pd.DataFrame([data.dict()])
-        
-        # ทำนาย
-        prediction = model.predict(df)[0]
-        confidence = float(model.predict_proba(df).max() * 100)
-        
-        status = "มีภาวะเบื่ออาหาร" if prediction == 1 else "ปกติ"
-        recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if prediction == 1 else "รักษาพฤติกรรมการกินต่อไป"
-        
-        return {
-            "prediction": str(prediction),
-            "status": status,
-            "confidence": round(confidence, 2),
-            "recommendation": recommendation
-        }
-    except Exception as e:
-        return {"error": str(e)}
+def predict(data: HealthData):
+    if model is None:
+        raise HTTPException(500, "โมเดลไม่พร้อมใช้งาน")
 
-@app.post("/predict_tab")
-async def predict_tab(tab_file: UploadFile = File(...)):
-    if not model_loaded:
-        return {"error": "โมเดลไม่พร้อมใช้งาน"}
-    
+    # สร้าง DataFrame
+    df = pd.DataFrame([{
+        'Meals_per_day': data.Meals_per_day,
+        'Food_Intake_Percentage': data.Food_Intake_Percentage,
+        'Calories': data.Calories,
+        'BMI': data.BMI,
+        'BMR': data.BMR,
+        'Body_Fat_Percentage': data.Body_Fat_Percentage,
+        'ID': data.ID,
+        'Weight_Trend_Clear_Decrease': data.Weight_Trend_Clear_Decrease,
+        'Weight_Trend_Increase': data.Weight_Trend_Increase,
+        'Weight_Trend_Severe_Decrease': data.Weight_Trend_Severe_Decrease,
+        'Weight_Trend_Slight_Decrease': data.Weight_Trend_Slight_Decrease,
+        'Weight_Trend_Stable': data.Weight_Trend_Stable
+    }])
+
     try:
-        content = await tab_file.read()
-        df = pd.read_csv(pd.compat.StringIO(content.decode('utf-8')), sep='\t')
-        
-        # ตรวจสอบคอลัมน์
-        required_cols = ['Meals_per_day', 'Food_Intake_Percentage', 'Calories', 'BMI', 'BMR', 'Body_Fat_Percentage']
-        if not all(col in df.columns for col in required_cols):
-            return {"error": "ไฟล์ .tab ไม่มีคอลัมน์ที่จำเป็น"}
-        
-        # ทำนาย
-        prediction = model.predict(df)[0]
-        confidence = float(model.predict_proba(df).max() * 100)
-        
+        # ทำนายด้วยโมเดล Orange
+        prediction = model(df)[0]
+        probabilities = model(df, probs=True)[0]
+        confidence = round(max(probabilities) * 100, 2)
+
         status = "มีภาวะเบื่ออาหาร" if prediction == 1 else "ปกติ"
-        recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if prediction == 1 else "รักษาพฤติกรรมการกินต่อไป"
-        
+        recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if status == "มีภาวะเบื่ออาหาร" else "รักษาการกินที่ดีต่อไป"
+
         return {
-            "prediction": str(prediction),
             "status": status,
-            "confidence": round(confidence, 2),
+            "confidence": confidence,
             "recommendation": recommendation
         }
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(500, f"การทำนายล้มเหลว: {str(e)}")
