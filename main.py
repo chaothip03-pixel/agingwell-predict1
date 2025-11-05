@@ -133,4 +133,4 @@ async def predict_tab(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"การทำนายล้มเหลว: {str(e)}")") 
+        raise HTTPException(status_code=500, detail=f"การทำนายล้มเหลว: {str(e)}")
