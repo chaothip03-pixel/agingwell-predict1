@@ -28,7 +28,6 @@ def home():
         "model_loaded": model is not None
     }
 
-# === /predict_tab (รับ tab_data หรือ ไฟล์) ===
 @app.post("/predict_tab")
 async def predict_tab(
     tab_data: str = Form(None),
@@ -46,7 +45,7 @@ async def predict_tab(
             content = await tab_file.read()
             lines = content.decode("utf-8").strip().split("\n")
         else:
-        raise HTTPException(status_code=400, detail="ไม่พบข้อมูล")
+            raise HTTPException(status_code=400, detail="ไม่พบข้อมูล")  # ← แก้ตรงนี้
 
         if len(lines) < 2:
             raise HTTPException(status_code=400, detail="ต้องมี header + data")
@@ -68,7 +67,7 @@ async def predict_tab(
                 if col in ["ID", "Group"]:
                     row.append(int(float(val)) if val else 0)
                 elif col == "Weight_Trend":
-                    row.append(val)  # ส่ง string เช่น "Stable"
+                    row.append(val)
                 else:
                     row.append(float(val) if val else 0.0)
             else:
@@ -77,7 +76,7 @@ async def predict_tab(
         df = pd.DataFrame([row], columns=expected_columns)
 
         # 3. ทำนาย
-        prediction = int(model(df)[0])  # 0 หรือ 1
+        prediction = int(model(df)[0])
         proba = model.predict_proba(df)[0]
         confidence = round(max(proba) * 100, 2)
 
