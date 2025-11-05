@@ -4,5 +4,5 @@ pydantic
 pandas
 scikit-learn==1.3.2
 Orange3==3.36.2
-orange3-associate   # ถูกต้อง!
-python-multipart
+orange3-associate
+python-multipart  # สำคัญ! ต้องมีเพื่อรับ UploadFile
