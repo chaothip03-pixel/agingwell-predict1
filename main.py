@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from pydantic import BaseModel
-from io import StringIO
 import pandas as pd
 import os
 import pickle
@@ -28,6 +27,9 @@ def home():
         "model_loaded": model is not None
     }
 
+# --------------------------------------------------
+# 1) API แบบ TAB (ของเดิม)
+# --------------------------------------------------
 @app.post("/predict_tab")
 async def predict_tab(
     tab_data: str = Form(None),
@@ -38,14 +40,13 @@ async def predict_tab(
         raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน")
 
     try:
-        # 1. อ่านข้อมูล
         if tab_data:
             lines = tab_data.strip().split("\n")
         elif tab_file:
             content = await tab_file.read()
             lines = content.decode("utf-8").strip().split("\n")
         else:
-            raise HTTPException(status_code=400, detail="ไม่พบข้อมูล")  # ← แก้ตรงนี้
+            raise HTTPException(status_code=400, detail="ไม่พบข้อมูล")
 
         if len(lines) < 2:
             raise HTTPException(status_code=400, detail="ต้องมี header + data")
@@ -54,7 +55,6 @@ async def predict_tab(
         values = [v.strip() for v in lines[1].split("\t")]
         data_dict = dict(zip(headers, values))
 
-        # 2. สร้าง DataFrame
         expected_columns = [
             "Meals_per_day", "Food_Intake_Percentage", "Calories", "BMI",
             "Weight_Trend", "BMR", "Body_Fat_Percentage", "ID", "Group"
@@ -75,7 +75,6 @@ async def predict_tab(
 
         df = pd.DataFrame([row], columns=expected_columns)
 
-        # 3. ทำนาย
         prediction = int(model(df)[0])
         proba = model.predict_proba(df)[0]
         confidence = round(max(proba) * 100, 2)
@@ -91,3 +90,43 @@ async def predict_tab(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
+
+# --------------------------------------------------
+# 2) API แบบ JSON (ใช้กับ PHP)
+# --------------------------------------------------
+
+class WeeklyInput(BaseModel):
+    meals_per_week: float
+    food_intake_percentage: float
+
+@app.post("/predict_weekly")
+def predict_weekly(data: WeeklyInput):
+    if model is None:
+        raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน")
+
+    # สร้าง DataFrame ตามที่โมเดลต้องใช้
+    df = pd.DataFrame([{
+        "Meals_per_day": data.meals_per_week / 7,
+        "Food_Intake_Percentage": data.food_intake_percentage,
+        "Calories": 0,
+        "BMI": 0,
+        "Weight_Trend": "Stable",
+        "BMR": 0,
+        "Body_Fat_Percentage": 0,
+        "ID": 0,
+        "Group": 0
+    }])
+
+    prediction = int(model(df)[0])
+    proba = model.predict_proba(df)[0]
+    confidence = round(max(proba) * 100, 2)
+
+    status = "มีภาวะเบื่ออาหาร" if prediction == 1 else "ปกติ"
+    recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if prediction == 1 else "รับประทานได้ดีต่อเนื่อง"
+
+    return {
+        "status": status,
+        "confidence": f"{confidence}%",
+        "recommendation": recommendation
+    }
+
