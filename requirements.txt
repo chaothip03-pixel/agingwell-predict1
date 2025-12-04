@@ -1,8 +1,8 @@
 fastapi
-uvicorn
-pydantic
+uvicorn[standard]
 pandas
-scikit-learn
+scikit-learn==1.5.2        # ต้องตรงกับตอน train!!!
+# Orange ต้องติดตั้งแบบนี้ (เวอร์ชันล่าสุดที่รองรับ Python 3.11)
+Orange3==3.36.2
 python-multipart
-joblib
 
