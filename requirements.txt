@@ -2,13 +2,5 @@ fastapi
 uvicorn[standard]
 pandas
 python-multipart
-
-# ต้องใช้ Orange เวอร์ชันเก่าที่รองรับ Python 3.11 + Render
-Orange3==3.32.0
-
-# ใช้ scikit-learn ที่ Orange 3.32.0 รองรับเต็มที่
-scikit-learn==1.1.3
-joblib==1.2.0
-numpy<1.24
-scipy<1.11
+numpy
 
