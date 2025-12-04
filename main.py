@@ -1,63 +1,104 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form
-from pydantic import BaseModel
+# main.py
+from fastapi import FastAPI, Form, File, UploadFile
+from fastapi.responses import JSONResponse
 import pandas as pd
-import os
 import pickle
+import io
+import os
 
-app = FastAPI()
+# ====== 1. ต้องมีบรรทัดนี้ก่อน decorator ทุกตัว! ======
+app = FastAPI(
+    title="AgingWell AI Prediction",
+    description="รับข้อมูลแบบ TAB/TSV แล้วทำนายภาวะโภชนาการ",
+    version="1.0.0"
+)
 
-# โหลดโมเดล
-MODEL_PATH = "agingwell_final_1.pkcls"
-model = None
+# ====== 2. โหลดโมเดล (แก้ path ให้ตรงกับที่อัปโหลด) ======
+MODEL_PATH = "model_agingwell.pkl"  # หรือชื่อไฟล์จริงของคุณ
 
-if os.path.exists(MODEL_PATH):
-    try:
-        with open(MODEL_PATH, "rb") as f:
-            model = pickle.load(f)
-        print("โหลดโมเดลสำเร็จ")
-    except Exception as e:
-        print(f"โหลดโมเดลล้มเหลว: {e}")
-else:
-    print("ไม่พบไฟล์โมเดล")
+try:
+    with open(MODEL_PATH, "rb") as f:
+        model = pickle.load(f)
+    print("โหลดโมเดลจาก Orange สำเร็จ!")
+except Exception as e:
+    print(f"โหลดโมเดลล้มเหลว: {e}")
+    model = None
 
 @app.get("/")
-def home():
-    return {
-        "message": "AgingWell AI พร้อมใช้งาน",
-        "model_loaded": model is not None
-    }
+async def root():
+    return {"message": "AgingWell AI FastAPI พร้อมใช้งาน!", "docs": "/docs"}
 
-# รับ JSON จาก PHP
-class WeeklyInput(BaseModel):
-    meals_per_week: float
-    food_intake_percentage: float
-
-@app.post("/predict_weekly")
-def predict_weekly(data: WeeklyInput):
+# ====== 3. Endpoint ที่ PHP เรียกจริง ======
+@app.post("/predict_tab")
+async def predict_tab(
+    tab_data: str = Form(None),
+    tab_file: UploadFile = File(None)
+):
     if model is None:
-        raise HTTPException(status_code=500, detail="โมเดลไม่พร้อมใช้งาน")
+        return JSONResponse(status_code=500, content={
+            "status": "ข้อผิดพลาด",
+            "confidence": "0%",
+            "recommendation": "โหลดโมเดลไม่สำเร็จ"
+        })
 
-    df = pd.DataFrame([{
-        "Meals_per_day": data.meals_per_week / 7,
-        "Food_Intake_Percentage": data.food_intake_percentage,
-        "Calories": 0,
-        "BMI": 0,
-        "Weight_Trend": "Stable",
-        "BMR": 0,
-        "Body_Fat_Percentage": 0,
-        "ID": 0,
-        "Group": 0
-    }])
+    try:
+        # กรณีส่งมาเป็น text (จาก PHP)
+        if tab_data:
+            df = pd.read_csv(io.StringIO(tab_data), sep='\t')
+        
+        # กรณีส่งมาเป็นไฟล์
+        elif tab_file:
+            content = await tab_file.read()
+            df = pd.read_csv(io.BytesIO(content), sep='\t')
+        else:
+            return JSONResponse(status_code=400, content={
+                "status": "ผิดพลาด",
+                "confidence": "0%",
+                "recommendation": "กรุณาส่ง tab_data หรืออัปโหลดไฟล์"
+            })
 
-    prediction = int(model(df)[0])
-    proba = model.predict_proba(df)[0]
-    confidence = round(max(proba) * 100, 2)
+        # ตรวจสอบคอลัมน์ที่จำเป็น
+        required_cols = ['Meals_per_day', 'Food_Intake_Percentage']
+        if not all(col in df.columns for col in required_cols):
+            return JSONResponse(status_code=400, content={
+                "status": "ผิดพลาด",
+                "confidence": "0%",
+                "recommendation": "ข้อมูลไม่ครบ (ต้องมี Meals_per_day และ Food_Intake_Percentage)"
+            })
 
-    status = "มีภาวะเบื่ออาหาร" if prediction == 1 else "ปกติ"
-    recommendation = "ควรเพิ่มมื้ออาหารและโปรตีน" if prediction == 1 else "รับประทานได้ดีต่อเนื่อง"
+        # ทำนาย
+        prediction = model.predict(df)
+        prediction_proba = model.predict_proba(df)
+        
+        # แปลงผลเป็นข้อความภาษาไทย
+        status_map = {0: "ปกติ", 1: "เสี่ยงขาดสารอาหาร", 2: "ขาดสารอาหาร"}
+        pred_class = int(prediction[0])
+        confidence = f"{max(prediction_proba[0]) * 100:.1f}%"
+        
+        status_th = status_map.get(pred_class, "ไม่ทราบผล")
+        
+        # คำแนะนำเบื้องต้น (คุณปรับเพิ่มได้)
+        recommendations = {
+            "ปกติ": "ดีมากครับ! รักษาระดับการกินอาหารให้คงที่แบบนี้ต่อไป",
+            "เสี่ยงขาดสารอาหาร": "เริ่มมีสัญญาณเสี่ยง ควรเพิ่มปริมาณอาหารหรือความถี่ในการกิน",
+            "ขาดสารอาหาร": "ต้องรีบปรับพฤติกรรมการกินด่วน! แนะนำปรึกษาหมอโภชนาการ"
+        }
+        recommendation = recommendations.get(status_th, "ไม่มีคำแนะนำ")
 
-    return {
-        "status": status,
-        "confidence": f"{confidence}%",
-        "recommendation": recommendation
-    }
+        return {
+            "status": status_th,
+            "confidence": confidence,
+            "recommendation": recommendation
+        }
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={
+            "status": "ข้อผิดพลาดของเซิร์ฟเวอร์",
+            "confidence": "0%",
+            "recommendation": f"Error: {str(e)}"
+        })
+
+# ====== ถ้าอยากมี health check ======
+@app.get("/health")
+async def health():
+    return {"status": "ok", "model_loaded": model is not None}
