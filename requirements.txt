@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
 pandas
-scikit-learn==1.5.2        # ต้องตรงกับตอน train!!!
-# Orange ต้องติดตั้งแบบนี้ (เวอร์ชันล่าสุดที่รองรับ Python 3.11)
+scikit-learn==1.3.2          # Orange3 3.36.2 รองรับสูงสุด 1.3.x
 Orange3==3.36.2
 python-multipart
+gunicorn                     # ดีกว่าไว้สำหรับ production
 
