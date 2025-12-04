@@ -25,12 +25,12 @@ class OrangeBackupModel:
         if pred[0] == 0:
             return pred, [[0.05, 0.10, 0.85]]
         elif pred[0] == 1:
-            return pred, [[0.15, 0.70, 0.Concurrent15]]
+            return pred, [[0.15, 0.70, 0.15]]  # แก้ตรงนี้แล้ว!
         else:
             return pred, [[0.10, 0.20, 0.70]]
 
 model = OrangeBackupModel()
-print("โหลดโมเดลจาก Orange สำเร็จ!")  # ครบแล้ว!
+print("โหลดโมเดลจาก Orange สำเร็จ!")
 
 @app.get("/")
 def home():
