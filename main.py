@@ -5,32 +5,29 @@ import io
 app = FastAPI()
 
 class OrangeBackupModel:
-    def __call__(self, data):
+
+    def predict_class(self, data):
         meals = data["Meals_per_day"].iloc[0]
         intake = data["Food_Intake_Percentage"].iloc[0]
-        
-        if meals >= 2.8 and intake >= 85:
-            return [0]  # ปกติ
-        elif meals >= 2.0 and intake >= 70:
-            return [1]  # เสี่ยง
-        else:
-            return [2]  # ขาดสารอาหาร
-    
-    @property
-    def probs(self):
-        return True
 
-    def __call__(self, data, probs=None):
-        pred = self(data)
-        if pred[0] == 0:
-            return pred, [[0.05, 0.10, 0.85]]
-        elif pred[0] == 1:
-            return pred, [[0.15, 0.70, 0.15]]  # แก้ตรงนี้แล้ว!
+        if meals >= 2.8 and intake >= 85:
+            return 0  # ปกติ
+        elif meals >= 2.0 and intake >= 70:
+            return 1  # เสี่ยง
         else:
-            return pred, [[0.10, 0.20, 0.70]]
+            return 2  # ขาดสารอาหาร
+
+    def predict_proba(self, pred_class):
+        if pred_class == 0:
+            return [0.85, 0.10, 0.05]
+        elif pred_class == 1:
+            return [0.15, 0.70, 0.15]
+        else:
+            return [0.10, 0.20, 0.70]
+
 
 model = OrangeBackupModel()
-print("โหลดโมเดลจาก Orange สำเร็จ!")
+print("โหลดโมเดลสำเร็จ (Backup Model)!")
 
 @app.get("/")
 def home():
@@ -40,16 +37,24 @@ def home():
 async def predict_tab(tab_data: str = Form(None)):
     try:
         df = pd.read_csv(io.StringIO(tab_data), sep='\t')
-        pred, proba = model(df, model.probs)
-        
-        status_list = ["ปกติ", "เสี่ยงขาดสารอาหาร", "ขาดสารอาหาร"]
-        status = status_list[int(pred[0])]
-        confidence = f"{max(proba[0])*100:.1f}%"
-        
+
+        # ---- RUN MODEL ----
+        pred_class = model.predict_class(df)
+        proba = model.predict_proba(pred_class)
+
+        labels = ["ปกติ", "เสี่ยงขาดสารอาหาร", "ขาดสารอาหาร"]
+        status = labels[pred_class]
+        confidence = f"{max(proba) * 100:.1f}%"
+
         return {
             "status": status,
             "confidence": confidence,
             "recommendation": f"ผลวิเคราะห์จาก Orange Data Mining: {status}"
         }
-    except:
-        return {"status": "ผิดพลาด", "confidence": "0%", "recommendation": "กรุณากรอกข้อมูลให้ครบ"}
+
+    except Exception as e:
+        return {
+            "status": "ผิดพลาด",
+            "confidence": "0%",
+            "recommendation": f"กรุณากรอกข้อมูลให้ครบ / Error: {e}"
+        }
