@@ -1,60 +1,63 @@
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException
+import Orange
 import pandas as pd
+import numpy as np
 import io
 
-app = FastAPI()
+app = FastAPI(title="AgingWell AI", version="2.0")
 
-class OrangeBackupModel:
+MODEL_PATH = "agingwell_final_1.pkcls"   # ใส่ไฟล์โมเดลของคุณ
 
-    def predict_class(self, data):
-        meals = data["Meals_per_day"].iloc[0]
-        intake = data["Food_Intake_Percentage"].iloc[0]
+# โหลดโมเดล Orange
+try:
+    model = Orange.classification.TreeLearner()
+    model = Orange.data.io.load_pickle(MODEL_PATH)
+    print("โหลดโมเดล Orange (.pkcls) สำเร็จ!")
+except Exception as e:
+    print(f"โหลดโมเดลล้มเหลว: {e}")
+    model = None
 
-        if meals >= 2.8 and intake >= 85:
-            return 0  # ปกติ
-        elif meals >= 2.0 and intake >= 70:
-            return 1  # เสี่ยง
-        else:
-            return 2  # ขาดสารอาหาร
-
-    def predict_proba(self, pred_class):
-        if pred_class == 0:
-            return [0.85, 0.10, 0.05]
-        elif pred_class == 1:
-            return [0.15, 0.70, 0.15]
-        else:
-            return [0.10, 0.20, 0.70]
-
-
-model = OrangeBackupModel()
-print("โหลดโมเดลสำเร็จ (Backup Model)!")
 
 @app.get("/")
 def home():
-    return {"message": "AgingWell AI พร้อมใช้งาน (Orange Canvas)"}
+    return {
+        "message": "AgingWell AI พร้อมใช้งาน (Orange Model)",
+        "model_loaded": model is not None
+    }
+
 
 @app.post("/predict_tab")
-async def predict_tab(tab_data: str = Form(None)):
+async def predict_tab(tab_file: UploadFile = File(...)):
+    if model is None:
+        raise HTTPException(status_code=500, detail="ไม่พบโมเดล Orange")
+
     try:
-        df = pd.read_csv(io.StringIO(tab_data), sep='\t')
+        # อ่านเนื้อหา .tab
+        content = await tab_file.read()
+        df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep="\t")
 
-        # ---- RUN MODEL ----
-        pred_class = model.predict_class(df)
-        proba = model.predict_proba(pred_class)
+        # แปลงเป็น Orange Table
+        domain = model.domain
+        orange_data = Orange.data.Table.from_list(domain, df.values.tolist())
 
-        labels = ["ปกติ", "เสี่ยงขาดสารอาหาร", "ขาดสารอาหาร"]
-        status = labels[pred_class]
-        confidence = f"{max(proba) * 100:.1f}%"
+        # ทำนาย
+        prediction = model(orange_data)[0]                # ค่า class
+        prob = model(orange_data, model.Probs)[0]         # ค่า probability
+
+        pred_class_index = int(prediction)
+        confidence = round(max(prob) * 100, 2)
+
+        label_names = [str(val) for val in domain.class_var.values]
+
+        status = label_names[pred_class_index]
 
         return {
             "status": status,
-            "confidence": confidence,
-            "recommendation": f"ผลวิเคราะห์จาก Orange Data Mining: {status}"
+            "confidence": f"{confidence}%",
+            "probability": prob.tolist(),
+            "recommendation": "ควรรักษาพฤติกรรมการกิน" if status == "Normal"
+                              else "ควรเพิ่มมื้ออาหารและโปรตีนเพื่อแก้อาการเบื่ออาหาร"
         }
 
     except Exception as e:
-        return {
-            "status": "ผิดพลาด",
-            "confidence": "0%",
-            "recommendation": f"กรุณากรอกข้อมูลให้ครบ / Error: {e}"
-        }
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
