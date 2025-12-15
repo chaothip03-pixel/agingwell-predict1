@@ -26,29 +26,24 @@ def parse_tab_file(tab_text: str):
     return feats
 
 @app.post("/predict_tab")
-async def predict_tab(tab_file: UploadFile = File(...)):
+def predict_tab(tab_content: Dict[str, str] = Body(...)):
     try:
-        content = await tab_file.read()
-        tab_text = content.decode("utf-8")
+        tab = tab_content.get('tab')
+        if not tab:
+            raise HTTPException(status_code=400, detail="Missing 'tab' in request")
 
-        features = parse_tab_file(tab_text)
+        feats = parse_tab_to_features(tab)
 
-        probs = model.predict_with_confidence(features)
-        pred = probs[0]
+        # DEBUG สำคัญมาก
+        print("DEBUG features length:", len(feats))
+        print("DEBUG features:", feats)
 
-        # ตีความผล (ตาม training ของคุณ)
-        status = (
-            "มีภาวะเบื่ออาหาร"
-            if pred["class"] == 1 or "Loss" in str(pred)
-            else "ไม่พบภาวะเบื่ออาหาร"
-        )
-
-        return {
-            "status": status
-        }
+        probs = model.predict_with_confidence(feats)
+        return {"prediction": probs[0]}
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print("🔥 ERROR in /predict_tab:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
