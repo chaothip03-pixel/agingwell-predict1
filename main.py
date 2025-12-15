@@ -42,32 +42,32 @@ def parse_tab_to_features(tab_text: str):
 
     return vals
 
+from fastapi import FastAPI, HTTPException, Body
+# 👆 ต้องมี Body (คุณแก้ถูกแล้ว)
+
 @app.post("/predict_tab")
 def predict_tab(tab_content: Dict[str, str] = Body(...)):
-    try:
-        tab = tab_content.get("tab")
-        if not tab:
-            raise HTTPException(status_code=400, detail="Missing 'tab'")
+    tab = tab_content.get("tab")
+    if not tab:
+        raise HTTPException(status_code=400, detail="Missing tab")
 
-        feats = parse_tab_to_features(tab)
+    feats = parse_tab_to_features(tab)
 
-        print("DEBUG features length:", len(feats))
-        print("DEBUG features:", feats)
+    result = model.predict_with_confidence(feats)[0]
+    predicted_class = result.get("class", 0)
 
-        if len(feats) != model.n_features_in:
-            raise ValueError(
-                f"Feature count mismatch: got {len(feats)} expected {model.n_features_in}"
-            )
+    # mapping ให้เป็นภาษาคน
+    if predicted_class == 1:
+        status = "มีภาวะเบื่ออาหาร"
+        recommendation = "ควรติดตามพฤติกรรมการกินและปรึกษาเจ้าหน้าที่"
+    else:
+        status = "ปกติ"
+        recommendation = "พฤติกรรมการกินอยู่ในเกณฑ์ปกติ"
 
-        probs = model.predict_with_confidence(feats)
-        return {
-            "status": "ปกติ" if probs[0] < 0.5 else "มีภาวะเบื่ออาหาร",
-            "confidence": round(float(probs[0]) * 100, 2)
-        }
-
-    except Exception as e:
-        print("🔥 ERROR:", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "status": status,
+        "recommendation": recommendation
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
