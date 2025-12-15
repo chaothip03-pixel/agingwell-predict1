@@ -1,49 +1,77 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, HTTPException, Body
+from pydantic import BaseModel
+from typing import List, Any, Dict
 import uvicorn
-import numpy as np
-import io
-
 from orange_nn_model import OrangeNNModel
 
-MODEL_PATH = "nn_export.json"
+MODEL_PATH = 'nn_export.json'
 model = OrangeNNModel(MODEL_PATH)
 
-app = FastAPI(title="AgingWell Eating Behavior AI")
+print("MODEL EXPECT FEATURES:", model.n_features_in)
 
-def parse_tab_file(tab_text: str):
+app = FastAPI(title="AgingWell Eating Behavior API")
+
+class JSONPredictRequest(BaseModel):
+    features: List[float] = None
+    feature_map: Dict[str, float] = None
+
+class BatchPredictRequest(BaseModel):
+    records: List[Dict[str, Any]]
+
+def parse_tab_to_features(tab_text: str):
     lines = [l.strip() for l in tab_text.splitlines() if l.strip()]
-    if len(lines) < 2:
-        raise ValueError("ไฟล์ .tab ต้องมี header และ data อย่างน้อย 1 แถว")
+    if not lines:
+        raise ValueError("Empty .tab content")
 
-    values = lines[1].split()
-    feats = [float(v) for v in values]
+    first = lines[0].split()
+    second = lines[1].split() if len(lines) > 1 else None
 
-    if len(feats) != model.n_features_in:
-        raise ValueError(
-            f"จำนวน feature ไม่ตรง (ต้อง {model.n_features_in} ค่า)"
-        )
+    def is_numeric_list(lst):
+        try:
+            [float(x) for x in lst]
+            return True
+        except:
+            return False
 
-    return feats
+    if is_numeric_list(first):
+        vals = [float(x) for x in first]
+    elif second and is_numeric_list(second):
+        vals = [float(x) for x in second]
+    else:
+        raise ValueError("Invalid .tab format")
+
+    return vals
 
 @app.post("/predict_tab")
 def predict_tab(tab_content: Dict[str, str] = Body(...)):
     try:
-        tab = tab_content.get('tab')
+        tab = tab_content.get("tab")
         if not tab:
-            raise HTTPException(status_code=400, detail="Missing 'tab' in request")
+            raise HTTPException(status_code=400, detail="Missing 'tab'")
 
         feats = parse_tab_to_features(tab)
 
-        # DEBUG สำคัญมาก
         print("DEBUG features length:", len(feats))
         print("DEBUG features:", feats)
 
+        if len(feats) != model.n_features_in:
+            raise ValueError(
+                f"Feature count mismatch: got {len(feats)} expected {model.n_features_in}"
+            )
+
         probs = model.predict_with_confidence(feats)
-        return {"prediction": probs[0]}
+        return {
+            "status": "ปกติ" if probs[0] < 0.5 else "มีภาวะเบื่ออาหาร",
+            "confidence": round(float(probs[0]) * 100, 2)
+        }
 
     except Exception as e:
-        print("🔥 ERROR in /predict_tab:", str(e))
+        print("🔥 ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+ 
+
